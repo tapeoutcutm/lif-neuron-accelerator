@@ -1,90 +1,82 @@
 `default_nettype none
 
-module tt_um_lsnn_hschweig #(  
-    parameter MEMBRANE_WIDTH = 12,
-    parameter INPUT_WIDTH = 8,
-    parameter DECAY_FACTOR = 4'b0010,
-    parameter ADAPTATION_RATE = 4'b0001,
-    parameter REFRACTORY_PERIOD = 4'd3,
-    parameter THRESHOLD_BASE = 12'd100
-)(
-    input  wire [7:0] ui_in,
-    output wire [7:0] uo_out,
-    input  wire [7:0] uio_in,
-    output wire [7:0] uio_out,
-    output wire [7:0] uio_oe,
-    input  wire       ena,
-    input  wire       clk,
-    input  wire       rst_n
+module tt_um_lsnn_hschweig(
+    input  wire [7:0] ui_in,    // Dedicated inputs - input current
+    output wire [7:0] uo_out,   // Dedicated outputs (membrane and spike)
+    input  wire [7:0] uio_in,   // IOs: Input path (unused)
+    output wire [7:0] uio_out,  // IOs: Output path (threshold)
+    output wire [7:0] uio_oe,   // IOs: Enable path
+    input  wire       ena,      // Enable (ignored)
+    input  wire       clk,      // Clock
+    input  wire       rst_n     // Reset (active low)
 );
 
-    assign uio_oe = 8'hFF;  // All outputs
-
-    // Internal registers
-    reg [MEMBRANE_WIDTH-1:0] membrane_potential;
-    reg [MEMBRANE_WIDTH-1:0] threshold;
-    reg [MEMBRANE_WIDTH-1:0] adaptation;
-    reg [3:0] refractory_counter;
-    reg [6:0] spike_count;
-    reg spike_out;
-
-    // Control signals
-    wire learning_enable = uio_in[0];
+    // Parameters
+    parameter b0j = 8'd50;         // Base threshold
+    parameter adapt_jump = 8'd30;  // Adaptation jump after spike
+    parameter REFRACT_TIME = 3'd3; // Refractory period cycles
+    parameter TAU = 4'd8;          // Time constant (power of 2 for efficiency)
     
-    // Spike condition
-    wire threshold_crossed = (membrane_potential >= threshold);
-    wire can_spike = (refractory_counter == 0);
-    wire spike_condition = threshold_crossed && can_spike;
-
-    // Next membrane potential calculation
-    wire [MEMBRANE_WIDTH-1:0] decay = membrane_potential >> DECAY_FACTOR;
-    wire [MEMBRANE_WIDTH-1:0] next_membrane = 
-        spike_condition ? 0 : // Reset if spiking
-        (refractory_counter > 0) ? membrane_potential : // Hold during refractory
-        (membrane_potential - decay + {4'b0, ui_in}); // Normal update
-
-    // Output assignments
-    assign uo_out = {refractory_counter != 0, membrane_potential[11:5]};
-    assign uio_out = {spike_count, spike_out};
+    // State registers
+    reg [7:0] membrane;        // Membrane potential
+    reg [7:0] threshold;       // Current threshold register
+    reg [2:0] refract_count;   // Single refractory counter
+    reg spike_occurred;        // Register to track if spike happened this cycle
+    
+    // Refractory state tracking
+    wire in_refractory = (refract_count > 0);
+    
+    // Spike detection - only when not in refractory period
+    wire spike = !in_refractory && (membrane >= threshold);
+    
+    // Leaky integration calculation
+    wire [7:0] scaled_input = ui_in;
+    wire [7:0] neg_membrane = (~membrane) + 1'b1;
+    wire [8:0] membrane_change = scaled_input + neg_membrane;
+    wire [7:0] delta_v = membrane_change[8:0] >>> $clog2(TAU);
 
     // Sequential logic
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            membrane_potential <= 0;
-            threshold <= THRESHOLD_BASE;
-            adaptation <= 0;
-            refractory_counter <= 0;
-            spike_count <= 0;
-            spike_out <= 0;
+            membrane <= 8'b0;
+            threshold <= b0j;
+            refract_count <= 0;
+            spike_occurred <= 0;
         end else begin
-            // Update membrane potential
-            membrane_potential <= next_membrane;
+            // Update spike_occurred for threshold adaptation
+            spike_occurred <= spike;
+            
+            // Update threshold - do this first so we update right after spike
+            if (spike) begin
+                threshold <= threshold + adapt_jump;  // Direct threshold update on spike
+            end else if (threshold > b0j) begin
+                threshold <= threshold - 1;
+            end
             
             // Update refractory counter
-            if (spike_condition) begin
-                refractory_counter <= REFRACTORY_PERIOD;
-            end else if (refractory_counter > 0) begin
-                refractory_counter <= refractory_counter - 1;
+            if (spike) begin
+                refract_count <= REFRACT_TIME;
+            end else if (refract_count > 0) begin
+                refract_count <= refract_count - 1;
             end
 
-            // Update adaptation
-            if (learning_enable) begin
-                if (spike_condition) begin
-                    adaptation <= adaptation + (adaptation >> ADAPTATION_RATE);
-                end else if (adaptation > 0) begin
-                    adaptation <= adaptation - 1;
-                end
-            end
-
-            // Update threshold
-            threshold <= THRESHOLD_BASE + adaptation;
-
-            // Update spike output and count
-            spike_out <= spike_condition;
-            if (spike_condition) begin
-                spike_count <= spike_count + 1;
+            // Update membrane potential
+            if (spike || in_refractory) begin
+                membrane <= 8'b0;
+            end else begin
+                membrane <= (delta_v[7] && membrane < |delta_v) ? 8'b0 :
+                           (!delta_v[7] && membrane > (8'hFF - delta_v)) ? 8'hFF :
+                           membrane + delta_v;
             end
         end
     end
+
+    // Output assignments
+    assign uo_out = {membrane[6:0], spike};  // Output current membrane and spike status
+    assign uio_out = threshold;
+    assign uio_oe = 8'hFF;
+
+    // Handle unused inputs
+    wire _unused = &{ena, uio_in};
 
 endmodule
