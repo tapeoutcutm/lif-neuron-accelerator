@@ -1,15 +1,15 @@
 # Tiny Tapeout project information
 project:
-  title:        "Neuromorphic Hardware for SNN LSTM"      
-  author:       "Hunter Schweiger"      
-  discord:      "hunter557445"      
-  description:  "efficient neuromorphic hardware for running a SNN LSTM unit"      
+  title:        "Adaptive Leaky Integrate-and-Fire spiking neuron core for edge AI"      
+  author:       "CUTM"      
+  discord:      ""      
+  description:  "Hardware implementation of an adaptive leaky integrate-and-fire spiking neuron for edge AI"      
   language:     "Verilog"
   clock_hz:     50000000       # Adding suggested clock frequency since your design is clocked
   tiles: "1x1"          
-  top_module:  "tt_um_lsnn_hschweig"
+  top_module:  "tt_um_snn_core"
   source_files:
-    - "tt_um_lsnn_hschweig.v"
+    - "project.v"
 
 # Required documentation fields
 documentation:
