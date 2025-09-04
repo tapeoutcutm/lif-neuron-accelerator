@@ -10,8 +10,6 @@ project:
   top_module:  "tt_um_snn_core"
   source_files:
     - "project.v"
-  language: "Verilog"
-  
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 pinout:
